@@ -8,7 +8,7 @@
  * Author: SAHAL ARBANI
  * Status: PRODUCTION READY
  * Updates:
- * - Feature (UI/UX): Integrasi library 'boxen' untuk Flight Deck Dashboard dan 'cli-table3' untuk visualisasi data terstruktur.
+ * - Feature (UI/UX): Integrasi library 'boxen' untuk Control Deck Dashboard dan 'cli-table3' untuk visualisasi data terstruktur.
  * - Feature (Core): Menggabungkan fitur navigasi mundur (Back Navigation) di seluruh layer state machine.
  * - Feature (Core): Mengembalikan dan menyempurnakan Fast-Track Staging (Select All) dan Interactive Manual Staging.
  * - Feature (Core): Mengembalikan AIOps (Auto-Commit) secara utuh tanpa pemotongan logika.
@@ -110,7 +110,7 @@ const GitOps = {
 
     checkRemote(repoName) {
         const username = SysOps.execCmd('gh api user -q .login', true);
-        if (!username) throw new Error('Sesi GitHub CLI tidak valid.');
+        if (!username) throw new Error('GitHub CLI session invalid.');
         const exists = SysOps.execCmd(`gh repo view ${username}/${repoName}`, true);
         return { username, exists: exists !== null };
     },
@@ -160,7 +160,7 @@ const GitOps = {
         return raw.split('\n').map(b => ({
             name: b.replace('*', '').trim().split(/\s+/)[0],
             isCurrent: b.includes('*'),
-            lastCommit: b.split(/\s+/).slice(2, 5).join(' ') || 'Tidak ada data'
+            lastCommit: b.split(/\s+/).slice(2, 5).join(' ') || 'NO DATA'
         })).filter(b => b.name);
     },
 
@@ -186,9 +186,9 @@ const GitOps = {
 // --- MODUL 3: ARTIFICIAL INTELLIGENCE (AIOPS) ---
 const AIOps = {
     async fetchAvailableModels(apiKey) {
-        if (!apiKey) throw new Error('API Key kosong.');
+        if (!apiKey) throw new Error('API key missing.');
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-        if (!response.ok) throw new Error('Gagal menarik daftar model dari server.');
+        if (!response.ok) throw new Error('Failed to fetch model manifest from server.');
         
         const data = await response.json();
         return data.models
@@ -215,14 +215,14 @@ const AIOps = {
             const data = await response.json();
             
             if (!response.ok) {
-                const errMsg = data.error?.message || 'Server menolak request.';
+                const errMsg = data.error?.message || 'Server rejected request.';
                 throw new Error(errMsg);
             }
             
             const textRaw = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
             return JSON.parse(textRaw);
         } catch (error) {
-            throw new Error(`AI Gagal (${modelName}): ${error.message}`);
+            throw new Error(`AI failed (${modelName}): ${error.message}`);
         }
     }
 };
@@ -457,12 +457,12 @@ async function handleBranchManager() {
         UI.renderBranchTable(branches);
 
         const action = await select({
-            message: THEME.accent(`[CABANG] Branch Manager | Aktif: ${THEME.text(currentBranch)}`),
+            message: THEME.accent(`[BRANCH] MANAGER | ACTIVE: ${THEME.text(currentBranch)}`),
             options: [
-                { value: 'switch', label: '[>] Pindah Branch (Switch)' },
-                { value: 'create', label: '[+] Buat Branch Baru (Local)' },
-                { value: 'delete', label: '[-] Hapus Branch' },
-                { value: 'back', label: '[<] Kembali ke Pusat Komando' }
+                { value: 'switch', label: '[>] SWITCH BRANCH' },
+                { value: 'create', label: '[+] CREATE LOCAL BRANCH' },
+                { value: 'delete', label: '[-] DELETE LOCAL BRANCH' },
+                { value: 'back', label: '[<] RETURN TO CONTROL DECK' }
             ]
         });
 
@@ -470,10 +470,10 @@ async function handleBranchManager() {
 
         if (action === 'switch') {
             const target = await select({
-                message: THEME.accent('Pilih Branch Tujuan:'),
+                message: THEME.accent('[BRANCH] SELECT TARGET:'),
                 options: [
                     ...branches.map(b => ({ value: b.name, label: `${b.isCurrent ? '*' : ' '} ${b.name}` })),
-                    { value: 'back', label: '[<] Batal' }
+                    { value: 'back', label: '[<] CANCEL' }
                 ]
             });
             if (target !== 'back' && target !== currentBranch) GitOps.switchBranch(target);
@@ -481,27 +481,27 @@ async function handleBranchManager() {
 
         if (action === 'create') {
             const newBranch = await text({
-                message: THEME.text('Masukkan nama branch baru:'),
-                placeholder: 'misal: feat/ui-update',
-                validate(val) { if (val.trim().length === 0) return 'Nama tidak boleh kosong!'; }
+                message: THEME.text('[BRANCH] INPUT NEW BRANCH NAME:'),
+                placeholder: 'example: feat/ui-update',
+                validate(val) { if (val.trim().length === 0) return 'Branch name required.'; }
             });
             GitOps.createAndCheckoutBranch(newBranch);
-            note(`Berhasil membuat dan berpindah ke branch lokal: ${newBranch}`, THEME.primary('Sukses'));
+            UI.renderNote(`Created and switched to local branch: ${newBranch}`, 'OK');
         }
 
         if (action === 'delete') {
             const safeToDelete = branches.filter(b => !b.isCurrent);
             if (safeToDelete.length === 0) {
-                note(THEME.text('Tidak ada branch lain yang bisa dihapus.'), THEME.border('Info'));
+                UI.renderNote('No standby branch available for deletion.', 'INF');
                 continue;
             }
             const toDelete = await multiselect({
-                message: THEME.error('Pilih branch yang ingin dihapus permanen dari lokal:'),
+                message: THEME.error('[WRN] SELECT LOCAL BRANCHES TO DELETE:'),
                 options: safeToDelete.map(b => ({ value: b.name, label: b.name }))
             });
             if (toDelete.length > 0) {
                 GitOps.deleteBranches(toDelete);
-                note(`Berhasil menghapus branch: ${toDelete.join(', ')}`, THEME.primary('Sukses'));
+                UI.renderNote(`Deleted branches: ${toDelete.join(', ')}`, 'OK');
             }
         }
     }
@@ -509,22 +509,22 @@ async function handleBranchManager() {
 
 async function main() {
     console.clear();
-    intro(THEME.primary(chalk.inverse(' SAHAL ARBANI | GHPUSH v4.5.0 VIP ')));
+    intro(THEME.primary(chalk.inverse(' SAHAL ARBANI | GHPUSH v4.6.0 CYBER CRT ')));
 
     const s = spinner();
     let config = SysOps.loadConfig();
 
-    // 1. Pilih Proyek
+    // 1. Project selection
     const projectsDir = path.join(os.homedir(), 'Projects');
     const projects = SysOps.getProjects(projectsDir);
     
     if (projects.length === 0) {
-        outro(THEME.error(`[ERR] Tidak ada direktori proyek di ${projectsDir}`));
+        outro(THEME.error(`[ERR] NO PROJECT DIRECTORY FOUND AT ${projectsDir}`));
         return;
     }
 
     const targetProject = await select({
-        message: THEME.accent('Pilih Workspace Proyek:'),
+        message: THEME.accent('[SYS] SELECT PROJECT WORKSPACE:'),
         options: projects.map(p => ({ value: p, label: `[*] ${p}` })),
         maxItems: 8
     });
@@ -536,32 +536,32 @@ async function main() {
     const { username, exists } = GitOps.checkRemote(targetProject);
     if (!exists) {
         const isPrivate = await confirm({
-            message: THEME.text('Repositori remote belum ada. Buat sebagai Private?'),
+            message: THEME.text('[NET] REMOTE REPOSITORY MISSING. CREATE AS PRIVATE?'),
             initialValue: true
         });
-        s.start('Membangun remote repository...');
+        s.start('BUILDING REMOTE REPOSITORY...');
         GitOps.createRemote(targetProject, isPrivate);
-        s.stop(THEME.primary('[OK] Remote repository berhasil dibangun.'));
+        s.stop(THEME.success('[OK] REMOTE REPOSITORY ONLINE.'));
     }
 
-    // 3. Pusat Komando (Loop)
+    // 3. Control deck loop
     while (true) {
         const currentBranch = GitOps.getCurrentBranch();
         
-        // Menampilkan Dashboard VIP
+        // Render Control Deck dashboard.
         UI.renderHeader(targetProject, currentBranch);
 
         const action = await select({
-            message: THEME.accent(`Pusat Komando [${targetProject}]:`),
+            message: THEME.accent(`[DECK] CONTROL CENTER :: ${targetProject}`),
             options: [
-                { value: 'deploy', label: '[>] Deploy Kode (Commit & Push)' },
-                { value: 'branch', label: '[*] Branch Manager (Kontrol Cabang)' },
-                { value: 'exit', label: '[x] Keluar dari Workspace' }
+                { value: 'deploy', label: '[>] DEPLOY CODE (COMMIT & PUSH)' },
+                { value: 'branch', label: '[*] BRANCH MANAGER' },
+                { value: 'exit', label: '[x] EXIT WORKSPACE' }
             ]
         });
 
         if (action === 'exit') {
-            outro(THEME.primary('[<] Terminasi program selesai.'));
+            outro(THEME.primary('[<] SESSION TERMINATED.'));
             break;
         }
 
