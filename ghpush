@@ -1,0 +1,578 @@
+#!/usr/bin/env node
+
+/**
+ * ==========================================
+ * CHANGELOG & VERSION
+ * Version: 4.6.0 (CYBER CRT EDITION)
+ * Date: 2026-06-12
+ * Author: SAHAL ARBANI
+ * Status: PRODUCTION READY
+ * Updates:
+ * - Feature (UI/UX): Integrasi library 'boxen' untuk Flight Deck Dashboard dan 'cli-table3' untuk visualisasi data terstruktur.
+ * - Feature (Core): Menggabungkan fitur navigasi mundur (Back Navigation) di seluruh layer state machine.
+ * - Feature (Core): Mengembalikan dan menyempurnakan Fast-Track Staging (Select All) dan Interactive Manual Staging.
+ * - Feature (Core): Mengembalikan AIOps (Auto-Commit) secara utuh tanpa pemotongan logika.
+ * - Refactor (Theme): Menerapkan palet Cyber CRT (cyan, magenta, amber) dengan dashboard terminal.
+ * - Refactor (TUI): Menambahkan frame, status rail, dan label prompt bergaya control deck.
+ * ==========================================
+ */
+
+import { intro, outro, select, multiselect, text, confirm, spinner, note, password } from '@clack/prompts';
+import chalk from 'chalk';
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import boxen from 'boxen';
+import Table from 'cli-table3';
+
+// --- KONFIGURASI PALET WARNA (CYBER CRT) ---
+const THEME = {
+    primary: chalk.hex('#00F5FF'), // Neon Cyan
+    accent: chalk.hex('#FF2BD6'),  // Magenta
+    warning: chalk.hex('#FFB000'), // Amber CRT
+    success: chalk.hex('#00FF88'), // Signal Green
+    border: chalk.hex('#3B4B59'),  // Dim Steel
+    muted: chalk.hex('#7C8A99'),   // Terminal Muted
+    text: chalk.hex('#E8F7FF'),    // Cold White
+    error: chalk.hex('#FF4D6D')    // Hot Red
+};
+
+const FRAME = {
+    borderColor: '#00F5FF',
+    dimBorderColor: '#3B4B59',
+    alertColor: '#FF4D6D',
+    accentColor: '#FF2BD6'
+};
+
+const ENV_FILE = path.join(os.homedir(), '.ghpush.env');
+
+// --- MODUL 1: SYSTEM OPERATIONS (SYSOPS) ---
+const SysOps = {
+    execCmd(command, ignoreError = false) {
+        try {
+            return execSync(command, { encoding: 'utf-8', stdio: 'pipe' }).trim();
+        } catch (error) {
+            if (!ignoreError) throw new Error(error.stderr || error.message);
+            return null;
+        }
+    },
+
+    getProjects(baseDir) {
+        if (!fs.existsSync(baseDir)) return [];
+        return fs.readdirSync(baseDir, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name);
+    },
+
+    loadConfig() {
+        if (!fs.existsSync(ENV_FILE)) return {};
+        const content = fs.readFileSync(ENV_FILE, 'utf-8');
+        const config = {};
+        content.split('\n').forEach(line => {
+            const [key, ...val] = line.split('=');
+            if (key && val) config[key.trim()] = val.join('=').trim();
+        });
+        return config;
+    },
+
+    saveConfig(key, value) {
+        const config = this.loadConfig();
+        config[key] = value;
+        const newContent = Object.entries(config).map(([k, v]) => `${k}=${v}`).join('\n');
+        fs.writeFileSync(ENV_FILE, newContent, { mode: 0o600 });
+    },
+
+    hasPackageJson() {
+        return fs.existsSync('package.json');
+    }
+};
+
+// --- MODUL 2: GIT & GITHUB OPERATIONS (GITOPS) ---
+const GitOps = {
+    getStats() {
+        const ahead = SysOps.execCmd('git rev-list --count HEAD@{u}..HEAD', true) || '0';
+        const behind = SysOps.execCmd('git rev-list --count HEAD..HEAD@{u}', true) || '0';
+        const status = SysOps.execCmd('git status --porcelain', true);
+        const modified = status ? status.split('\n').length : 0;
+        return { ahead, behind, modified };
+    },
+
+    initRepo(repoPath) {
+        process.chdir(repoPath);
+        if (!fs.existsSync(path.join(repoPath, '.git'))) {
+            SysOps.execCmd('git init');
+            SysOps.execCmd('git branch -M main');
+            return true;
+        }
+        return false;
+    },
+
+    checkRemote(repoName) {
+        const username = SysOps.execCmd('gh api user -q .login', true);
+        if (!username) throw new Error('Sesi GitHub CLI tidak valid.');
+        const exists = SysOps.execCmd(`gh repo view ${username}/${repoName}`, true);
+        return { username, exists: exists !== null };
+    },
+
+    createRemote(repoName, isPrivate) {
+        const visibility = isPrivate ? '--private' : '--public';
+        SysOps.execCmd(`gh repo create ${repoName} ${visibility} --source=. --remote=origin`);
+    },
+
+    getUnstagedFiles() {
+        const statusLines = SysOps.execCmd('git status --porcelain');
+        if (!statusLines) return [];
+        return statusLines.split('\n').map(line => {
+            const status = line.substring(0, 2);
+            let file = line.substring(2).trim();
+            
+            if (file.includes(' -> ')) {
+                file = file.split(' -> ')[1];
+            }
+            if (file.startsWith('"') && file.endsWith('"')) {
+                file = file.slice(1, -1);
+            }
+            
+            return { status, file };
+        });
+    },
+
+    stageAllFiles() {
+        SysOps.execCmd('git add .');
+    },
+
+    stageFiles(files) {
+        files.forEach(file => SysOps.execCmd(`git add "${file}"`));
+    },
+
+    getStagedDiff() {
+        return SysOps.execCmd('git diff --staged');
+    },
+
+    getCurrentBranch() {
+        return SysOps.execCmd('git branch --show-current') || 'main';
+    },
+
+    getAllBranches() {
+        const raw = SysOps.execCmd('git branch -v');
+        if (!raw) return [];
+        return raw.split('\n').map(b => ({
+            name: b.replace('*', '').trim().split(/\s+/)[0],
+            isCurrent: b.includes('*'),
+            lastCommit: b.split(/\s+/).slice(2, 5).join(' ') || 'Tidak ada data'
+        })).filter(b => b.name);
+    },
+
+    createAndCheckoutBranch(branchName) {
+        SysOps.execCmd(`git checkout -b ${branchName}`);
+    },
+
+    switchBranch(branchName) {
+        SysOps.execCmd(`git checkout ${branchName}`);
+    },
+
+    deleteBranches(branches) {
+        branches.forEach(b => SysOps.execCmd(`git branch -D ${b}`));
+    },
+
+    commitAndPush(message, branch) {
+        SysOps.execCmd(`git commit -m "${message}"`);
+        SysOps.execCmd('git fetch origin', true);
+        SysOps.execCmd(`git push -u origin ${branch}`);
+    }
+};
+
+// --- MODUL 3: ARTIFICIAL INTELLIGENCE (AIOPS) ---
+const AIOps = {
+    async fetchAvailableModels(apiKey) {
+        if (!apiKey) throw new Error('API Key kosong.');
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        if (!response.ok) throw new Error('Gagal menarik daftar model dari server.');
+        
+        const data = await response.json();
+        return data.models
+            .map(m => m.name.replace('models/', ''))
+            .filter(name => 
+                (name.includes('gemini') || name.includes('gemma')) && 
+                !name.match(/image|tts|veo|imagen|embedding|aqa|lyria/i)
+            );
+    },
+
+    async generateCommitOptions(diff, apiKey, modelName) {
+        if (!apiKey) throw new Error('API Key tidak ditemukan.');
+        
+        const safeDiff = diff.length > 4000 ? diff.substring(0, 4000) + '\n...[TRUNCATED]' : diff;
+        const prompt = `Anda adalah Senior Software Engineer. Buat 3 opsi pesan Semantic Commit (bahasa Indonesia singkat) berdasarkan git diff berikut. HANYA kembalikan array JSON berisi string tanpa markdown formatting. Format: ["feat: tambah tombol login", "fix: perbaiki routing"].\n\nDiff:\n${safeDiff}`;
+
+        try {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            });
+
+            const data = await response.json();
+            
+            if (!response.ok) {
+                const errMsg = data.error?.message || 'Server menolak request.';
+                throw new Error(errMsg);
+            }
+            
+            const textRaw = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
+            return JSON.parse(textRaw);
+        } catch (error) {
+            throw new Error(`AI Gagal (${modelName}): ${error.message}`);
+        }
+    }
+};
+
+// --- MODUL 4: USER INTERFACE DASHBOARD (UI) ---
+const UI = {
+    renderSignalBar(label, value, color = THEME.primary) {
+        return `${THEME.muted(label.padEnd(9, ' '))} ${color(value)}`;
+    },
+
+    renderHeader(project, branch) {
+        const stats = GitOps.getStats();
+        const dirtyState = Number(stats.modified) > 0 ? 'DIRTY' : 'CLEAN';
+        const syncState = Number(stats.ahead) > 0 || Number(stats.behind) > 0 ? 'SYNC PENDING' : 'SYNCED';
+        const content = [
+            THEME.primary('> LINK ESTABLISHED'),
+            '',
+            this.renderSignalBar('PROJECT', project, THEME.text),
+            this.renderSignalBar('BRANCH', branch, THEME.warning),
+            this.renderSignalBar('INDEX', dirtyState, Number(stats.modified) > 0 ? THEME.accent : THEME.success),
+            this.renderSignalBar('REMOTE', syncState, syncState === 'SYNCED' ? THEME.success : THEME.warning),
+            '',
+            `${THEME.muted('AHEAD'.padEnd(9, ' '))} ${THEME.success(stats.ahead)}   ${THEME.muted('BEHIND')} ${THEME.error(stats.behind)}   ${THEME.muted('MODIFIED')} ${THEME.accent(stats.modified)}`
+        ].join('\n');
+
+        console.log(boxen(content, {
+            padding: 1,
+            margin: 1,
+            borderStyle: 'double',
+            borderColor: FRAME.borderColor,
+            backgroundColor: '#020617',
+            title: THEME.accent(' GHPUSH CONTROL DECK '),
+            titleAlignment: 'center'
+        }));
+    },
+
+    renderBranchTable(branches) {
+        const table = new Table({
+            head: ['BRANCH', 'STATE', 'LAST COMMIT'],
+            chars: {
+                top: '-', 'top-mid': '+', 'top-left': '+', 'top-right': '+',
+                bottom: '-', 'bottom-mid': '+', 'bottom-left': '+', 'bottom-right': '+',
+                left: '|', 'left-mid': '+', mid: '-', 'mid-mid': '+',
+                right: '|', 'right-mid': '+', middle: '|'
+            },
+            style: { head: ['cyan'], border: ['grey'] }
+        });
+        branches.forEach(b => {
+            table.push([
+                b.isCurrent ? THEME.primary(b.name) : THEME.text(b.name),
+                b.isCurrent ? THEME.success('ONLINE') : THEME.muted('STANDBY'),
+                THEME.muted(b.lastCommit)
+            ]);
+        });
+        console.log(table.toString());
+    },
+
+    renderNote(message, title = 'SYS') {
+        note(THEME.text(message), THEME.primary(`[${title}]`));
+    }
+};
+
+// --- MODUL 5: MAIN PIPELINE ROUTING ---
+async function handleDeployFlow(targetProject, config, username, s) {
+    // 1. Pre-Deploy Hook
+    if (SysOps.hasPackageJson()) {
+        const runHook = await select({
+            message: THEME.accent('[SYS] PACKAGE.JSON TERDETEKSI. EKSEKUSI PRE-DEPLOY HOOK?'),
+            options: [
+                { value: 'skip', label: '[>] SKIP / DIRECT PUSH' },
+                { value: 'build', label: '[*] RUN npm run build' },
+                { value: 'lint', label: '[*] RUN npm run lint' },
+                { value: 'back', label: '[<] RETURN TO CONTROL DECK' }
+            ]
+        });
+
+        if (runHook === 'back') return;
+
+        if (runHook !== 'skip') {
+            s.start(`Mengeksekusi npm run ${runHook}...`);
+            try {
+                SysOps.execCmd(`npm run ${runHook}`);
+                s.stop(THEME.success(`[OK] HOOK ${runHook} COMPLETE.`));
+            } catch (err) {
+                s.stop(THEME.error(`[ERR] HOOK ${runHook} FAILED. DEPLOYMENT ABORTED.`));
+                note(THEME.text(err.message), THEME.error('[ERR] LOG'));
+                return;
+            }
+        }
+    }
+
+    // 2. Interactive File Staging
+    const unstagedFiles = GitOps.getUnstagedFiles();
+    if (unstagedFiles.length === 0) {
+        UI.renderNote('Working tree clean. No changes queued for push.', 'INF');
+        return;
+    }
+
+    const stagingMode = await select({
+        message: THEME.accent('[SYS] SELECT STAGING MODE:'),
+        options: [
+            { value: 'all', label: '[*] STAGE ALL FILES' },
+            { value: 'manual', label: '[>] MANUAL FILE SELECTION' },
+            { value: 'back', label: '[<] ABORT AND RETURN' }
+        ]
+    });
+
+    if (stagingMode === 'back') return;
+
+    if (stagingMode === 'all') {
+        GitOps.stageAllFiles();
+        UI.renderNote('All modified files staged.', 'OK');
+    } else {
+        const selectedFiles = await multiselect({
+            message: THEME.accent('[USR] SELECT FILES (SPACE = MARK, ENTER = COMMIT):'),
+            options: unstagedFiles.map(f => ({ value: f.file, label: `${f.status} ${f.file}` })),
+            required: true
+        });
+        GitOps.stageFiles(selectedFiles);
+    }
+    
+    // 3. AI Auto-Commit
+    let commitMessage = '';
+    const diff = GitOps.getStagedDiff();
+
+    while (commitMessage === '') {
+        const commitMethod = await select({
+            message: THEME.accent('[SYS] SELECT COMMIT MESSAGE MODE:'),
+            options: [
+                { value: 'ai', label: '[*] AI AUTO-COMMIT' },
+                { value: 'change_model', label: '[*] CONFIGURE AI MODEL' },
+                { value: 'manual', label: '[>] MANUAL COMMIT' },
+                { value: 'back', label: '[<] ABORT AND RETURN' }
+            ]
+        });
+
+        if (commitMethod === 'back') return;
+
+        let apiKey = config['GEMINI_API_KEY'];
+
+        if (commitMethod === 'change_model' || (commitMethod === 'ai' && !apiKey)) {
+            if (!apiKey) {
+                apiKey = await password({ message: THEME.text('[AUTH] INPUT GEMINI API KEY:') });
+                SysOps.saveConfig('GEMINI_API_KEY', apiKey);
+                config['GEMINI_API_KEY'] = apiKey;
+            }
+
+            if (commitMethod === 'change_model') {
+                s.start('FETCHING LATEST TEXT MODEL MANIFEST...');
+                try {
+                    const availableModels = await AIOps.fetchAvailableModels(apiKey);
+                    s.stop(THEME.success('[OK] MODEL MANIFEST READY.'));
+                    
+                    const chosenModel = await select({
+                        message: THEME.accent('[AI] SELECT ACTIVE MODEL:'),
+                        options: [
+                            ...availableModels.map(m => ({ value: m, label: m })),
+                            { value: 'back', label: '[<] CANCEL AND RETURN' }
+                        ],
+                        maxItems: 10
+                    });
+                    
+                    if (chosenModel !== 'back') {
+                        SysOps.saveConfig('AI_MODEL', chosenModel);
+                        config['AI_MODEL'] = chosenModel;
+                        UI.renderNote(`Model set to ${chosenModel}.`, 'AI');
+                    }
+                } catch (err) {
+                    s.stop(THEME.error('[ERR] MODEL MANIFEST FETCH FAILED.'));
+                }
+                continue;
+            }
+        }
+
+        if (commitMethod === 'ai') {
+            const activeModel = config['AI_MODEL'] || 'gemini-1.5-flash-latest';
+            
+            s.start(`ANALYZING DIFF WITH ${activeModel}...`);
+            try {
+                const aiOptions = await AIOps.generateCommitOptions(diff, apiKey, activeModel);
+                s.stop(THEME.success(`[OK] ANALYSIS COMPLETE: ${activeModel}.`));
+                
+                const selectedOpt = await select({
+                    message: THEME.accent('[AI] SELECT COMMIT VECTOR:'),
+                    options: [
+                        ...aiOptions.map(opt => ({ value: opt, label: opt })),
+                        { value: 'cancel', label: '[<] CANCEL AND RESELECT' }
+                    ]
+                });
+
+                if (selectedOpt !== 'cancel') commitMessage = selectedOpt;
+            } catch (err) {
+                s.stop(THEME.error(err.message));
+            }
+        } else if (commitMethod === 'manual') {
+            const type = await select({
+                message: THEME.text('[USR] SELECT SEMANTIC TYPE:'),
+                options: [
+                    ...['feat', 'fix', 'refactor', 'docs', 'chore'].map(t => ({ value: t, label: t })),
+                    { value: 'back', label: '[<] RETURN' }
+                ]
+            });
+            
+            if (type === 'back') continue;
+
+            const msg = await text({
+                message: THEME.text('[USR] INPUT DESCRIPTION:'),
+                validate: val => val.length === 0 ? 'Description required.' : undefined
+            });
+            commitMessage = `${type}: ${msg}`;
+        }
+    }
+
+    // 4. Push Eksekusi Final
+    const targetBranch = GitOps.getCurrentBranch();
+    s.start(`UPLINKING CODE TO GITHUB (BRANCH: ${targetBranch})...`);
+    try {
+        GitOps.commitAndPush(commitMessage, targetBranch);
+        s.stop(THEME.success('[OK] DEPLOYMENT COMPLETE.'));
+        UI.renderNote(`URL: https://github.com/${username}/${targetProject}/tree/${targetBranch}`, 'OK');
+    } catch (err) {
+        s.stop(THEME.error('[ERR] PUSH CONFLICT DETECTED.'));
+        note(THEME.text(err.message), THEME.error('[ERR] LOG'));
+    }
+}
+
+async function handleBranchManager() {
+    while (true) {
+        const branches = GitOps.getAllBranches();
+        const currentBranch = branches.find(b => b.isCurrent)?.name || 'main';
+
+        UI.renderBranchTable(branches);
+
+        const action = await select({
+            message: THEME.accent(`[CABANG] Branch Manager | Aktif: ${THEME.text(currentBranch)}`),
+            options: [
+                { value: 'switch', label: '[>] Pindah Branch (Switch)' },
+                { value: 'create', label: '[+] Buat Branch Baru (Local)' },
+                { value: 'delete', label: '[-] Hapus Branch' },
+                { value: 'back', label: '[<] Kembali ke Pusat Komando' }
+            ]
+        });
+
+        if (action === 'back') break;
+
+        if (action === 'switch') {
+            const target = await select({
+                message: THEME.accent('Pilih Branch Tujuan:'),
+                options: [
+                    ...branches.map(b => ({ value: b.name, label: `${b.isCurrent ? '*' : ' '} ${b.name}` })),
+                    { value: 'back', label: '[<] Batal' }
+                ]
+            });
+            if (target !== 'back' && target !== currentBranch) GitOps.switchBranch(target);
+        }
+
+        if (action === 'create') {
+            const newBranch = await text({
+                message: THEME.text('Masukkan nama branch baru:'),
+                placeholder: 'misal: feat/ui-update',
+                validate(val) { if (val.trim().length === 0) return 'Nama tidak boleh kosong!'; }
+            });
+            GitOps.createAndCheckoutBranch(newBranch);
+            note(`Berhasil membuat dan berpindah ke branch lokal: ${newBranch}`, THEME.primary('Sukses'));
+        }
+
+        if (action === 'delete') {
+            const safeToDelete = branches.filter(b => !b.isCurrent);
+            if (safeToDelete.length === 0) {
+                note(THEME.text('Tidak ada branch lain yang bisa dihapus.'), THEME.border('Info'));
+                continue;
+            }
+            const toDelete = await multiselect({
+                message: THEME.error('Pilih branch yang ingin dihapus permanen dari lokal:'),
+                options: safeToDelete.map(b => ({ value: b.name, label: b.name }))
+            });
+            if (toDelete.length > 0) {
+                GitOps.deleteBranches(toDelete);
+                note(`Berhasil menghapus branch: ${toDelete.join(', ')}`, THEME.primary('Sukses'));
+            }
+        }
+    }
+}
+
+async function main() {
+    console.clear();
+    intro(THEME.primary(chalk.inverse(' SAHAL ARBANI | GHPUSH v4.5.0 VIP ')));
+
+    const s = spinner();
+    let config = SysOps.loadConfig();
+
+    // 1. Pilih Proyek
+    const projectsDir = path.join(os.homedir(), 'Projects');
+    const projects = SysOps.getProjects(projectsDir);
+    
+    if (projects.length === 0) {
+        outro(THEME.error(`[ERR] Tidak ada direktori proyek di ${projectsDir}`));
+        return;
+    }
+
+    const targetProject = await select({
+        message: THEME.accent('Pilih Workspace Proyek:'),
+        options: projects.map(p => ({ value: p, label: `[*] ${p}` })),
+        maxItems: 8
+    });
+
+    const projectPath = path.join(projectsDir, targetProject);
+    GitOps.initRepo(projectPath);
+
+    // 2. Cek Remote
+    const { username, exists } = GitOps.checkRemote(targetProject);
+    if (!exists) {
+        const isPrivate = await confirm({
+            message: THEME.text('Repositori remote belum ada. Buat sebagai Private?'),
+            initialValue: true
+        });
+        s.start('Membangun remote repository...');
+        GitOps.createRemote(targetProject, isPrivate);
+        s.stop(THEME.primary('[OK] Remote repository berhasil dibangun.'));
+    }
+
+    // 3. Pusat Komando (Loop)
+    while (true) {
+        const currentBranch = GitOps.getCurrentBranch();
+        
+        // Menampilkan Dashboard VIP
+        UI.renderHeader(targetProject, currentBranch);
+
+        const action = await select({
+            message: THEME.accent(`Pusat Komando [${targetProject}]:`),
+            options: [
+                { value: 'deploy', label: '[>] Deploy Kode (Commit & Push)' },
+                { value: 'branch', label: '[*] Branch Manager (Kontrol Cabang)' },
+                { value: 'exit', label: '[x] Keluar dari Workspace' }
+            ]
+        });
+
+        if (action === 'exit') {
+            outro(THEME.primary('[<] Terminasi program selesai.'));
+            break;
+        }
+
+        if (action === 'branch') {
+            await handleBranchManager();
+        }
+
+        if (action === 'deploy') {
+            await handleDeployFlow(targetProject, config, username, s);
+        }
+    }
+}
+
+main().catch(console.error);
