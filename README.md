@@ -13,9 +13,10 @@ ghpush
 - Cek dan buat remote GitHub memakai GitHub CLI
 - Stage semua file atau pilih file manual
 - Buat commit manual atau generate pesan commit via Gemini AI
+- AI commit memakai skill `atomic-commits` agar pesan commit tetap fokus, kecil, dan reviewable
 - Push branch aktif ke GitHub
 - Branch manager untuk switch, create, dan delete branch lokal
-- TUI Cyber CRT dengan dashboard status repository
+- TUI modern dengan dashboard status repository dan ASCII wordmark
 
 ## Requirement
 
@@ -124,6 +125,13 @@ AI_MODEL=gemini-1.5-flash-latest
 
 File ini dibuat dengan permission `600`.
 
+AI commit sekarang membawa skill bawaan `atomic-commits`. Skill ini mengarahkan model untuk:
+
+- Membuat satu logical change per commit
+- Menghindari pesan WIP atau terlalu umum
+- Menjaga commit tetap reviewable
+- Memilih scope paling dominan saat diff terlalu campur aduk
+
 ## Usage
 
 Jalankan:
@@ -136,7 +144,7 @@ Alur utama:
 
 1. Pilih workspace project
 2. Cek atau buat remote GitHub
-3. Pilih action dari Control Deck
+3. Pilih action dari dashboard workspace
 4. Stage file
 5. Pilih metode commit
 6. Push ke branch aktif
@@ -162,4 +170,3 @@ Cek syntax:
 ```bash
 node --check ghpush
 ```
-

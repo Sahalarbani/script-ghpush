@@ -3,17 +3,14 @@
 /**
  * ==========================================
  * CHANGELOG & VERSION
- * Version: 4.6.0 (CYBER CRT EDITION)
+ * Version: 4.7.0 (MODERN TUI + SKILLS)
  * Date: 2026-06-12
  * Author: SAHAL ARBANI
  * Status: PRODUCTION READY
  * Updates:
- * - Feature (UI/UX): Integrasi library 'boxen' untuk Control Deck Dashboard dan 'cli-table3' untuk visualisasi data terstruktur.
- * - Feature (Core): Menggabungkan fitur navigasi mundur (Back Navigation) di seluruh layer state machine.
- * - Feature (Core): Mengembalikan dan menyempurnakan Fast-Track Staging (Select All) dan Interactive Manual Staging.
- * - Feature (Core): Mengembalikan AIOps (Auto-Commit) secara utuh tanpa pemotongan logika.
- * - Refactor (Theme): Menerapkan palet Cyber CRT (cyan, magenta, amber) dengan dashboard terminal.
- * - Refactor (TUI): Menambahkan frame, status rail, dan label prompt bergaya control deck.
+ * - Feature (AI): Menambahkan skill atomic-commits untuk menjaga commit tetap kecil, fokus, dan reviewable.
+ * - Feature (UI/UX): Menambahkan ASCII wordmark dan dashboard modern bergaya graphite.
+ * - Refactor (Theme): Mengganti palet Cyber CRT ke Modern Graphite dengan aksen biru, hijau, dan amber.
  * ==========================================
  */
 
@@ -26,26 +23,52 @@ import os from 'os';
 import boxen from 'boxen';
 import Table from 'cli-table3';
 
-// --- KONFIGURASI PALET WARNA (CYBER CRT) ---
+// --- KONFIGURASI PALET WARNA (MODERN GRAPHITE) ---
 const THEME = {
-    primary: chalk.hex('#00F5FF'), // Neon Cyan
-    accent: chalk.hex('#FF2BD6'),  // Magenta
-    warning: chalk.hex('#FFB000'), // Amber CRT
-    success: chalk.hex('#00FF88'), // Signal Green
-    border: chalk.hex('#3B4B59'),  // Dim Steel
-    muted: chalk.hex('#7C8A99'),   // Terminal Muted
-    text: chalk.hex('#E8F7FF'),    // Cold White
-    error: chalk.hex('#FF4D6D')    // Hot Red
+    primary: chalk.hex('#60A5FA'), // Modern Blue
+    accent: chalk.hex('#22D3EE'),  // Cyan Accent
+    warning: chalk.hex('#F59E0B'), // Amber
+    success: chalk.hex('#34D399'), // Emerald
+    border: chalk.hex('#475569'),  // Slate Border
+    muted: chalk.hex('#94A3B8'),   // Slate Muted
+    text: chalk.hex('#F8FAFC'),    // Soft White
+    error: chalk.hex('#FB7185')    // Rose
 };
 
 const FRAME = {
-    borderColor: '#00F5FF',
-    dimBorderColor: '#3B4B59',
-    alertColor: '#FF4D6D',
-    accentColor: '#FF2BD6'
+    borderColor: '#60A5FA',
+    dimBorderColor: '#475569',
+    alertColor: '#FB7185',
+    accentColor: '#22D3EE'
 };
 
 const ENV_FILE = path.join(os.homedir(), '.ghpush.env');
+
+const ASCII_LOGO = String.raw`
+   ____ _   _ ____  _   _ ____  _   _
+  / ___| | | |  _ \| | | / ___|| | | |
+ | |  _| |_| | |_) | | | \___ \| |_| |
+ | |_| |  _  |  __/| |_| |___) |  _  |
+  \____|_| |_|_|    \___/|____/|_| |_|
+`;
+
+const SKILLS = {
+    atomicCommits: {
+        name: 'atomic-commits',
+        description: 'Guidance on commit size, scope, reviewable commits, splitting large changes, and commit hygiene.',
+        principles: [
+            'One logical change per commit.',
+            'Commit should compile and tests should pass.',
+            'Commit message explains why, not only what changed.'
+        ],
+        guidelines: [
+            'Prefer XS-S commits for single fixes, config changes, or one feature.',
+            'Avoid mixing refactoring with features.',
+            'Avoid WIP, catch-all, or unrelated bundled commits.',
+            'If the diff looks broad, suggest the narrowest accurate commit message.'
+        ]
+    }
+};
 
 // --- MODUL 1: SYSTEM OPERATIONS (SYSOPS) ---
 const SysOps = {
@@ -199,11 +222,23 @@ const AIOps = {
             );
     },
 
+    buildSkillContext(skill) {
+        return [
+            `Skill: ${skill.name}`,
+            skill.description,
+            'Principles:',
+            ...skill.principles.map(item => `- ${item}`),
+            'Guidelines:',
+            ...skill.guidelines.map(item => `- ${item}`)
+        ].join('\n');
+    },
+
     async generateCommitOptions(diff, apiKey, modelName) {
         if (!apiKey) throw new Error('API Key tidak ditemukan.');
         
         const safeDiff = diff.length > 4000 ? diff.substring(0, 4000) + '\n...[TRUNCATED]' : diff;
-        const prompt = `Anda adalah Senior Software Engineer. Buat 3 opsi pesan Semantic Commit (bahasa Indonesia singkat) berdasarkan git diff berikut. HANYA kembalikan array JSON berisi string tanpa markdown formatting. Format: ["feat: tambah tombol login", "fix: perbaiki routing"].\n\nDiff:\n${safeDiff}`;
+        const skillContext = this.buildSkillContext(SKILLS.atomicCommits);
+        const prompt = `Anda adalah Senior Software Engineer. Gunakan skill berikut saat membuat pesan commit.\n\n${skillContext}\n\nBuat 3 opsi pesan Semantic Commit dalam bahasa Indonesia singkat berdasarkan git diff berikut. Setiap opsi harus mewakili satu logical change, tidak WIP, tidak terlalu umum, dan tetap reviewable. Jika diff terlalu campur aduk, pilih scope paling dominan dan buat pesan yang jujur terhadap diff. HANYA kembalikan array JSON berisi string tanpa markdown formatting. Format: ["feat: tambah tombol login", "fix: perbaiki routing"].\n\nDiff:\n${safeDiff}`;
 
         try {
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
@@ -230,7 +265,7 @@ const AIOps = {
 // --- MODUL 4: USER INTERFACE DASHBOARD (UI) ---
 const UI = {
     renderSignalBar(label, value, color = THEME.primary) {
-        return `${THEME.muted(label.padEnd(9, ' '))} ${color(value)}`;
+        return `${THEME.muted(label.padEnd(10, ' '))} ${color(value)}`;
     },
 
     renderHeader(project, branch) {
@@ -238,30 +273,33 @@ const UI = {
         const dirtyState = Number(stats.modified) > 0 ? 'DIRTY' : 'CLEAN';
         const syncState = Number(stats.ahead) > 0 || Number(stats.behind) > 0 ? 'SYNC PENDING' : 'SYNCED';
         const content = [
-            THEME.primary('> LINK ESTABLISHED'),
+            THEME.primary(ASCII_LOGO.trimEnd()),
+            '',
+            `${THEME.success('CONNECTED')} ${THEME.muted('GitHub workflow console')}`,
             '',
             this.renderSignalBar('PROJECT', project, THEME.text),
             this.renderSignalBar('BRANCH', branch, THEME.warning),
             this.renderSignalBar('INDEX', dirtyState, Number(stats.modified) > 0 ? THEME.accent : THEME.success),
             this.renderSignalBar('REMOTE', syncState, syncState === 'SYNCED' ? THEME.success : THEME.warning),
+            this.renderSignalBar('AI SKILL', SKILLS.atomicCommits.name, THEME.accent),
             '',
-            `${THEME.muted('AHEAD'.padEnd(9, ' '))} ${THEME.success(stats.ahead)}   ${THEME.muted('BEHIND')} ${THEME.error(stats.behind)}   ${THEME.muted('MODIFIED')} ${THEME.accent(stats.modified)}`
+            `${THEME.muted('AHEAD'.padEnd(10, ' '))} ${THEME.success(stats.ahead)}   ${THEME.muted('BEHIND')} ${THEME.error(stats.behind)}   ${THEME.muted('MODIFIED')} ${THEME.accent(stats.modified)}`
         ].join('\n');
 
         console.log(boxen(content, {
             padding: 1,
             margin: 1,
-            borderStyle: 'double',
+            borderStyle: 'round',
             borderColor: FRAME.borderColor,
-            backgroundColor: '#020617',
-            title: THEME.accent(' GHPUSH CONTROL DECK '),
+            backgroundColor: '#0F172A',
+            title: THEME.accent(' ghpush workspace '),
             titleAlignment: 'center'
         }));
     },
 
     renderBranchTable(branches) {
         const table = new Table({
-            head: ['BRANCH', 'STATE', 'LAST COMMIT'],
+            head: ['Branch', 'State', 'Last Commit'],
             chars: {
                 top: '-', 'top-mid': '+', 'top-left': '+', 'top-right': '+',
                 bottom: '-', 'bottom-mid': '+', 'bottom-left': '+', 'bottom-right': '+',
@@ -273,7 +311,7 @@ const UI = {
         branches.forEach(b => {
             table.push([
                 b.isCurrent ? THEME.primary(b.name) : THEME.text(b.name),
-                b.isCurrent ? THEME.success('ONLINE') : THEME.muted('STANDBY'),
+                b.isCurrent ? THEME.success('active') : THEME.muted('local'),
                 THEME.muted(b.lastCommit)
             ]);
         });
@@ -290,12 +328,12 @@ async function handleDeployFlow(targetProject, config, username, s) {
     // 1. Pre-Deploy Hook
     if (SysOps.hasPackageJson()) {
         const runHook = await select({
-            message: THEME.accent('[SYS] PACKAGE.JSON TERDETEKSI. EKSEKUSI PRE-DEPLOY HOOK?'),
+            message: THEME.accent('Package.json terdeteksi. Jalankan pre-deploy hook?'),
             options: [
-                { value: 'skip', label: '[>] SKIP / DIRECT PUSH' },
-                { value: 'build', label: '[*] RUN npm run build' },
-                { value: 'lint', label: '[*] RUN npm run lint' },
-                { value: 'back', label: '[<] RETURN TO CONTROL DECK' }
+                { value: 'skip', label: 'Skip / direct push' },
+                { value: 'build', label: 'Run npm run build' },
+                { value: 'lint', label: 'Run npm run lint' },
+                { value: 'back', label: 'Return to workspace' }
             ]
         });
 
@@ -305,10 +343,10 @@ async function handleDeployFlow(targetProject, config, username, s) {
             s.start(`Mengeksekusi npm run ${runHook}...`);
             try {
                 SysOps.execCmd(`npm run ${runHook}`);
-                s.stop(THEME.success(`[OK] HOOK ${runHook} COMPLETE.`));
+                s.stop(THEME.success(`Hook ${runHook} complete.`));
             } catch (err) {
-                s.stop(THEME.error(`[ERR] HOOK ${runHook} FAILED. DEPLOYMENT ABORTED.`));
-                note(THEME.text(err.message), THEME.error('[ERR] LOG'));
+                s.stop(THEME.error(`Hook ${runHook} failed. Deployment aborted.`));
+                note(THEME.text(err.message), THEME.error('Error log'));
                 return;
             }
         }
@@ -322,11 +360,11 @@ async function handleDeployFlow(targetProject, config, username, s) {
     }
 
     const stagingMode = await select({
-        message: THEME.accent('[SYS] SELECT STAGING MODE:'),
+        message: THEME.accent('Select staging mode:'),
         options: [
-            { value: 'all', label: '[*] STAGE ALL FILES' },
-            { value: 'manual', label: '[>] MANUAL FILE SELECTION' },
-            { value: 'back', label: '[<] ABORT AND RETURN' }
+            { value: 'all', label: 'Stage all files' },
+            { value: 'manual', label: 'Manual file selection' },
+            { value: 'back', label: 'Abort and return' }
         ]
     });
 
@@ -337,7 +375,7 @@ async function handleDeployFlow(targetProject, config, username, s) {
         UI.renderNote('All modified files staged.', 'OK');
     } else {
         const selectedFiles = await multiselect({
-            message: THEME.accent('[USR] SELECT FILES (SPACE = MARK, ENTER = COMMIT):'),
+            message: THEME.accent('Select files (space = mark, enter = commit):'),
             options: unstagedFiles.map(f => ({ value: f.file, label: `${f.status} ${f.file}` })),
             required: true
         });
@@ -350,12 +388,12 @@ async function handleDeployFlow(targetProject, config, username, s) {
 
     while (commitMessage === '') {
         const commitMethod = await select({
-            message: THEME.accent('[SYS] SELECT COMMIT MESSAGE MODE:'),
+            message: THEME.accent('Select commit message mode:'),
             options: [
-                { value: 'ai', label: '[*] AI AUTO-COMMIT' },
-                { value: 'change_model', label: '[*] CONFIGURE AI MODEL' },
-                { value: 'manual', label: '[>] MANUAL COMMIT' },
-                { value: 'back', label: '[<] ABORT AND RETURN' }
+                { value: 'ai', label: `AI auto-commit (${SKILLS.atomicCommits.name})` },
+                { value: 'change_model', label: 'Configure AI model' },
+                { value: 'manual', label: 'Manual commit' },
+                { value: 'back', label: 'Abort and return' }
             ]
         });
 
@@ -365,22 +403,22 @@ async function handleDeployFlow(targetProject, config, username, s) {
 
         if (commitMethod === 'change_model' || (commitMethod === 'ai' && !apiKey)) {
             if (!apiKey) {
-                apiKey = await password({ message: THEME.text('[AUTH] INPUT GEMINI API KEY:') });
+                apiKey = await password({ message: THEME.text('Input Gemini API key:') });
                 SysOps.saveConfig('GEMINI_API_KEY', apiKey);
                 config['GEMINI_API_KEY'] = apiKey;
             }
 
             if (commitMethod === 'change_model') {
-                s.start('FETCHING LATEST TEXT MODEL MANIFEST...');
+                s.start('Fetching latest text model manifest...');
                 try {
                     const availableModels = await AIOps.fetchAvailableModels(apiKey);
-                    s.stop(THEME.success('[OK] MODEL MANIFEST READY.'));
+                    s.stop(THEME.success('Model manifest ready.'));
                     
                     const chosenModel = await select({
-                        message: THEME.accent('[AI] SELECT ACTIVE MODEL:'),
+                        message: THEME.accent('Select active AI model:'),
                         options: [
                             ...availableModels.map(m => ({ value: m, label: m })),
-                            { value: 'back', label: '[<] CANCEL AND RETURN' }
+                            { value: 'back', label: 'Cancel and return' }
                         ],
                         maxItems: 10
                     });
@@ -391,7 +429,7 @@ async function handleDeployFlow(targetProject, config, username, s) {
                         UI.renderNote(`Model set to ${chosenModel}.`, 'AI');
                     }
                 } catch (err) {
-                    s.stop(THEME.error('[ERR] MODEL MANIFEST FETCH FAILED.'));
+                    s.stop(THEME.error('Model manifest fetch failed.'));
                 }
                 continue;
             }
@@ -400,16 +438,16 @@ async function handleDeployFlow(targetProject, config, username, s) {
         if (commitMethod === 'ai') {
             const activeModel = config['AI_MODEL'] || 'gemini-1.5-flash-latest';
             
-            s.start(`ANALYZING DIFF WITH ${activeModel}...`);
+            s.start(`Analyzing diff with ${activeModel} and ${SKILLS.atomicCommits.name}...`);
             try {
                 const aiOptions = await AIOps.generateCommitOptions(diff, apiKey, activeModel);
-                s.stop(THEME.success(`[OK] ANALYSIS COMPLETE: ${activeModel}.`));
+                s.stop(THEME.success(`Analysis complete: ${activeModel}.`));
                 
                 const selectedOpt = await select({
-                    message: THEME.accent('[AI] SELECT COMMIT VECTOR:'),
+                    message: THEME.accent('Select reviewable commit message:'),
                     options: [
                         ...aiOptions.map(opt => ({ value: opt, label: opt })),
-                        { value: 'cancel', label: '[<] CANCEL AND RESELECT' }
+                        { value: 'cancel', label: 'Cancel and reselect' }
                     ]
                 });
 
@@ -419,17 +457,17 @@ async function handleDeployFlow(targetProject, config, username, s) {
             }
         } else if (commitMethod === 'manual') {
             const type = await select({
-                message: THEME.text('[USR] SELECT SEMANTIC TYPE:'),
+                message: THEME.text('Select semantic type:'),
                 options: [
                     ...['feat', 'fix', 'refactor', 'docs', 'chore'].map(t => ({ value: t, label: t })),
-                    { value: 'back', label: '[<] RETURN' }
+                    { value: 'back', label: 'Return' }
                 ]
             });
             
             if (type === 'back') continue;
 
             const msg = await text({
-                message: THEME.text('[USR] INPUT DESCRIPTION:'),
+                message: THEME.text('Input description:'),
                 validate: val => val.length === 0 ? 'Description required.' : undefined
             });
             commitMessage = `${type}: ${msg}`;
@@ -438,14 +476,14 @@ async function handleDeployFlow(targetProject, config, username, s) {
 
     // 4. Push Eksekusi Final
     const targetBranch = GitOps.getCurrentBranch();
-    s.start(`UPLINKING CODE TO GITHUB (BRANCH: ${targetBranch})...`);
+    s.start(`Pushing code to GitHub (branch: ${targetBranch})...`);
     try {
         GitOps.commitAndPush(commitMessage, targetBranch);
-        s.stop(THEME.success('[OK] DEPLOYMENT COMPLETE.'));
+        s.stop(THEME.success('Deployment complete.'));
         UI.renderNote(`URL: https://github.com/${username}/${targetProject}/tree/${targetBranch}`, 'OK');
     } catch (err) {
-        s.stop(THEME.error('[ERR] PUSH CONFLICT DETECTED.'));
-        note(THEME.text(err.message), THEME.error('[ERR] LOG'));
+        s.stop(THEME.error('Push failed.'));
+        note(THEME.text(err.message), THEME.error('Error log'));
     }
 }
 
@@ -457,12 +495,12 @@ async function handleBranchManager() {
         UI.renderBranchTable(branches);
 
         const action = await select({
-            message: THEME.accent(`[BRANCH] MANAGER | ACTIVE: ${THEME.text(currentBranch)}`),
+            message: THEME.accent(`Branch manager | active: ${THEME.text(currentBranch)}`),
             options: [
-                { value: 'switch', label: '[>] SWITCH BRANCH' },
-                { value: 'create', label: '[+] CREATE LOCAL BRANCH' },
-                { value: 'delete', label: '[-] DELETE LOCAL BRANCH' },
-                { value: 'back', label: '[<] RETURN TO CONTROL DECK' }
+                { value: 'switch', label: 'Switch branch' },
+                { value: 'create', label: 'Create local branch' },
+                { value: 'delete', label: 'Delete local branch' },
+                { value: 'back', label: 'Return to workspace' }
             ]
         });
 
@@ -470,10 +508,10 @@ async function handleBranchManager() {
 
         if (action === 'switch') {
             const target = await select({
-                message: THEME.accent('[BRANCH] SELECT TARGET:'),
+                message: THEME.accent('Select target branch:'),
                 options: [
                     ...branches.map(b => ({ value: b.name, label: `${b.isCurrent ? '*' : ' '} ${b.name}` })),
-                    { value: 'back', label: '[<] CANCEL' }
+                    { value: 'back', label: 'Cancel' }
                 ]
             });
             if (target !== 'back' && target !== currentBranch) GitOps.switchBranch(target);
@@ -481,7 +519,7 @@ async function handleBranchManager() {
 
         if (action === 'create') {
             const newBranch = await text({
-                message: THEME.text('[BRANCH] INPUT NEW BRANCH NAME:'),
+                message: THEME.text('Input new branch name:'),
                 placeholder: 'example: feat/ui-update',
                 validate(val) { if (val.trim().length === 0) return 'Branch name required.'; }
             });
@@ -496,7 +534,7 @@ async function handleBranchManager() {
                 continue;
             }
             const toDelete = await multiselect({
-                message: THEME.error('[WRN] SELECT LOCAL BRANCHES TO DELETE:'),
+                message: THEME.error('Select local branches to delete:'),
                 options: safeToDelete.map(b => ({ value: b.name, label: b.name }))
             });
             if (toDelete.length > 0) {
@@ -509,7 +547,7 @@ async function handleBranchManager() {
 
 async function main() {
     console.clear();
-    intro(THEME.primary(chalk.inverse(' SAHAL ARBANI | GHPUSH v4.6.0 CYBER CRT ')));
+    intro(THEME.primary(chalk.inverse(' SAHAL ARBANI | GHPUSH v4.7.0 MODERN TUI ')));
 
     const s = spinner();
     let config = SysOps.loadConfig();
@@ -519,13 +557,13 @@ async function main() {
     const projects = SysOps.getProjects(projectsDir);
     
     if (projects.length === 0) {
-        outro(THEME.error(`[ERR] NO PROJECT DIRECTORY FOUND AT ${projectsDir}`));
+        outro(THEME.error(`No project directory found at ${projectsDir}`));
         return;
     }
 
     const targetProject = await select({
-        message: THEME.accent('[SYS] SELECT PROJECT WORKSPACE:'),
-        options: projects.map(p => ({ value: p, label: `[*] ${p}` })),
+        message: THEME.accent('Select project workspace:'),
+        options: projects.map(p => ({ value: p, label: p })),
         maxItems: 8
     });
 
@@ -536,12 +574,12 @@ async function main() {
     const { username, exists } = GitOps.checkRemote(targetProject);
     if (!exists) {
         const isPrivate = await confirm({
-            message: THEME.text('[NET] REMOTE REPOSITORY MISSING. CREATE AS PRIVATE?'),
+            message: THEME.text('Remote repository missing. Create as private?'),
             initialValue: true
         });
-        s.start('BUILDING REMOTE REPOSITORY...');
+        s.start('Building remote repository...');
         GitOps.createRemote(targetProject, isPrivate);
-        s.stop(THEME.success('[OK] REMOTE REPOSITORY ONLINE.'));
+        s.stop(THEME.success('Remote repository online.'));
     }
 
     // 3. Control deck loop
@@ -552,16 +590,16 @@ async function main() {
         UI.renderHeader(targetProject, currentBranch);
 
         const action = await select({
-            message: THEME.accent(`[DECK] CONTROL CENTER :: ${targetProject}`),
+            message: THEME.accent(`Workspace actions :: ${targetProject}`),
             options: [
-                { value: 'deploy', label: '[>] DEPLOY CODE (COMMIT & PUSH)' },
-                { value: 'branch', label: '[*] BRANCH MANAGER' },
-                { value: 'exit', label: '[x] EXIT WORKSPACE' }
+                { value: 'deploy', label: 'Deploy code (commit & push)' },
+                { value: 'branch', label: 'Branch manager' },
+                { value: 'exit', label: 'Exit workspace' }
             ]
         });
 
         if (action === 'exit') {
-            outro(THEME.primary('[<] SESSION TERMINATED.'));
+            outro(THEME.primary('Session terminated.'));
             break;
         }
 
